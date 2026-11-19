@@ -9,11 +9,16 @@ import org.slf4j.LoggerFactory;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.player.Player;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 
 public class FriendMod implements ClientModInitializer {
 	public static final Logger LOGGER = LoggerFactory.getLogger("friendmod");
@@ -22,6 +27,14 @@ public class FriendMod implements ClientModInitializer {
 	public void onInitializeClient() {
 		FriendList.load();
 		ClientTickEvents.END_CLIENT_TICK.register(FriendTracker::tick);
+
+		// Do not hit friends: cancel the attack on the client.
+		AttackEntityCallback.EVENT.register((player, level, hand, entity, hitResult) ->
+			entity instanceof Player target && FriendList.contains(target.getPlainTextName())
+				? InteractionResult.FAIL
+				: InteractionResult.PASS);
+
+		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("friendmod", "friend_distance"), FriendHud::render);
 
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, buildContext) ->
 			dispatcher.register(

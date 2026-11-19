@@ -7,6 +7,8 @@ Client-side mod. Commands (type with a leading slash in chat):
 - `/friend list`          - show friends
 
 Friends' nicknames are slightly green (above the head and in Tab).
+You cannot hit friends (the attack is cancelled).
+A friend who is 20+ blocks away is shown at the top of the screen as an arrow and the distance in metres.
 A player that a friend is hitting gets a red nickname for 5 seconds.
 
 The list is saved in `.minecraft/config/friends.json`.
