@@ -6,6 +6,8 @@ Client-side mod. Commands (type with a leading slash in chat):
 - `/friend remove <nick>` - remove a friend (Tab completes from your list)
 - `/friend list`          - show friends
 
+Nicknames of friends are shown slightly green (above the head).
+
 The list is saved in `.minecraft/config/friends.json`.
 
 ## Build

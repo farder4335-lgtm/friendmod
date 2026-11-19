@@ -12,6 +12,12 @@
 			"com.friendmod.FriendMod"
 		]
 	},
+	"mixins": [
+		{
+			"config": "friendmod.client.mixins.json",
+			"environment": "client"
+		}
+	],
 	"depends": {
 		"fabricloader": ">=0.20.1",
 		"minecraft": "~26.2",
