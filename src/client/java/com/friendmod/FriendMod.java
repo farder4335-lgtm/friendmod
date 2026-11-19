@@ -64,6 +64,13 @@ public class FriendMod implements ClientModInitializer {
 								}
 								return 1;
 							})))
+					.then(ClientCommands.literal("debug")
+						.executes(ctx -> {
+							for (String line : FriendHud.debugLines()) {
+								ctx.getSource().sendFeedback(Component.literal(line));
+							}
+							return 1;
+						}))
 					.then(ClientCommands.literal("list")
 						.executes(ctx -> {
 							List<String> friends = FriendList.all();

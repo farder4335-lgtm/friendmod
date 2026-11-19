@@ -1,6 +1,8 @@
 package com.friendmod;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -88,5 +90,66 @@ public final class FriendHud {
 			graphics.centeredText(client.font, text, graphics.guiWidth() / 2, y, 0xFF000000 | FriendTracker.FRIEND_COLOR);
 			y += 11;
 		}
+	}
+
+	/** Text lines for /friend debug: what the server sends and how it matches the friends. */
+	public static List<String> debugLines() {
+		List<String> lines = new ArrayList<>();
+		Minecraft client = Minecraft.getInstance();
+		if (client.player == null || client.level == null) {
+			lines.add("not in a world");
+			return lines;
+		}
+		ClientPacketListener connection = client.player.connection;
+
+		Map<UUID, TrackedWaypoint> waypoints = new HashMap<>();
+		int[] total = {0};
+		connection.getWaypointManager().forEachWaypoint(client.player, wp -> {
+			total[0]++;
+			wp.id().left().ifPresent(id -> waypoints.put(id, wp));
+		});
+		lines.add("waypoints from server: " + total[0] + " (with player UUID: " + waypoints.size() + ")");
+		lines.add("friends in list: " + FriendList.all().size() + ", players in Tab: " + connection.getListedOnlinePlayers().size());
+
+		TrackedWaypoint.Camera camera = new TrackedWaypoint.Camera() {
+			@Override
+			public float yaw() {
+				return client.player.getYRot();
+			}
+
+			@Override
+			public Vec3 position() {
+				return client.player.getEyePosition();
+			}
+		};
+
+		for (String friend : FriendList.all()) {
+			PlayerInfo info = null;
+			for (PlayerInfo candidate : connection.getListedOnlinePlayers()) {
+				if (candidate.getProfile().name().equalsIgnoreCase(friend)) {
+					info = candidate;
+					break;
+				}
+			}
+			if (info == null) {
+				lines.add(friend + ": NOT in Tab list (offline, other server, or hidden from Tab)");
+				continue;
+			}
+			UUID id = info.getProfile().id();
+			StringBuilder sb = new StringBuilder(friend + ": in Tab");
+			sb.append(client.level.getPlayerByUUID(id) != null ? ", loaded nearby" : ", NOT loaded");
+			TrackedWaypoint wp = waypoints.get(id);
+			if (wp == null) {
+				sb.append(", NO waypoint from server");
+			} else {
+				double distanceSq = wp.distanceSquared(client.player);
+				sb.append(", waypoint: ")
+					.append(Double.isInfinite(distanceSq) ? "direction only" : Math.round(Math.sqrt(distanceSq)) + " m")
+					.append(", angle ")
+					.append(Math.round(wp.yawAngleToCamera(client.level, camera, entity -> 1.0F)));
+			}
+			lines.add(sb.toString());
+		}
+		return lines;
 	}
 }

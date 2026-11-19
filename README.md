@@ -4,6 +4,7 @@ Client-side mod. Commands (type with a leading slash in chat):
 
 - `/friend add <nick>`    - add a friend
 - `/friend remove <nick>` - remove a friend (Tab completes from your list)
+- `/friend debug`        - diagnostics: what waypoints the server sends and how friends match
 - `/friend list`          - show friends
 
 Friends' nicknames are slightly green (above the head and in Tab).
