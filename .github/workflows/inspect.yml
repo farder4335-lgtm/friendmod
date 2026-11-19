@@ -19,10 +19,11 @@ jobs:
       - name: Generate sources
         run: ./gradlew genSources --no-daemon
       - name: Extract info
+        shell: bash {0}
         run: |
           JAR=$(find / -name "*sources.jar" -path "*inecraft*" 2>/dev/null | grep -v friendmod | head -n 1)
           echo "sources jar: $JAR"
-          mkdir -p /tmp/src && cd /tmp/src && unzip -q "$JAR"
+          mkdir -p /tmp/src && cd /tmp/src && unzip -q "$JAR"; ls | head
           {
             echo "### jar: $JAR"
             echo "### Entity.getDisplayName"; grep -n -A12 "Component getDisplayName" net/minecraft/world/entity/Entity.java
