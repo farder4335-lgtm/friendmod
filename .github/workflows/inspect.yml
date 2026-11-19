@@ -21,11 +21,12 @@ jobs:
       - name: Extract info
         shell: bash {0}
         run: |
-          JAR=$(find / -name "*sources.jar" -path "*inecraft*" 2>/dev/null | grep -v friendmod | head -n 1)
+          find / -name "*sources*.jar" 2>/dev/null | grep -v "/proc/" > /tmp/cands.txt
+          JAR=$(grep -i "minecraft" /tmp/cands.txt | grep -vi "fabric-api\|fabric-loader\|/build/libs/" | head -n 1)
           echo "sources jar: $JAR"
           mkdir -p /tmp/src && cd /tmp/src && unzip -q "$JAR"; ls | head
           {
-            echo "### jar: $JAR"
+            echo "### jar: $JAR"; cat /tmp/cands.txt | head -20
             echo "### Entity.getDisplayName"; grep -n -A12 "Component getDisplayName" net/minecraft/world/entity/Entity.java
             echo "### Player/Avatar getDisplayName/getName"; grep -rn "getDisplayName\|Component getName" net/minecraft/world/entity/player/Player.java net/minecraft/world/entity/Avatar.java 2>/dev/null
             echo "### nameTag in renderers"; grep -rn "nameTag\|getNameTag\|shouldShowName" net/minecraft/client/renderer/entity/EntityRenderer.java net/minecraft/client/renderer/entity/player/*.java net/minecraft/client/renderer/entity/state/EntityRenderState.java 2>/dev/null
