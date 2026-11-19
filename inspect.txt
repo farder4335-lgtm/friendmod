@@ -1,0 +1,775 @@
+### waypoint files
+./net/minecraft/network/protocol/game/ClientboundTrackedWaypointPacket.java
+./net/minecraft/commands/arguments/WaypointArgument.java
+./net/minecraft/world/waypoints/package-info.java
+./net/minecraft/world/waypoints/WaypointManager.java
+./net/minecraft/world/waypoints/Waypoint.java
+./net/minecraft/world/waypoints/WaypointStyleAsset.java
+./net/minecraft/world/waypoints/WaypointStyleAssets.java
+./net/minecraft/world/waypoints/WaypointTransmitter.java
+./net/minecraft/world/waypoints/PartialTickSupplier.java
+./net/minecraft/world/waypoints/TrackedWaypointManager.java
+./net/minecraft/world/waypoints/TrackedWaypoint.java
+./net/minecraft/client/data/models/WaypointStyleProvider.java
+./net/minecraft/client/resources/WaypointStyleManager.java
+./net/minecraft/client/resources/WaypointStyle.java
+./net/minecraft/client/waypoints/package-info.java
+./net/minecraft/client/waypoints/ClientWaypointManager.java
+./net/minecraft/server/commands/WaypointCommand.java
+./net/minecraft/server/waypoints/package-info.java
+./net/minecraft/server/waypoints/ServerWaypointManager.java
+=================== ./net/minecraft/network/protocol/game/ClientboundTrackedWaypointPacket.java
+package net.minecraft.network.protocol.game;
+public record ClientboundTrackedWaypointPacket(ClientboundTrackedWaypointPacket.Operation operation, TrackedWaypoint waypoint)
+	implements Packet<ClientGamePacketListener> {
+	public static final StreamCodec<RegistryFriendlyByteBuf, ClientboundTrackedWaypointPacket> STREAM_CODEC = StreamCodec.composite(
+		ClientboundTrackedWaypointPacket.Operation.STREAM_CODEC,
+		ClientboundTrackedWaypointPacket::operation,
+		TrackedWaypoint.STREAM_CODEC,
+		ClientboundTrackedWaypointPacket::waypoint,
+		ClientboundTrackedWaypointPacket::new
+	);
+	public static ClientboundTrackedWaypointPacket removeWaypoint(final UUID identifier) {
+		return new ClientboundTrackedWaypointPacket(ClientboundTrackedWaypointPacket.Operation.UNTRACK, TrackedWaypoint.empty(identifier));
+	}
+	public static ClientboundTrackedWaypointPacket addWaypointPosition(final UUID identifier, final Waypoint.Icon icon, final Vec3i position) {
+		return new ClientboundTrackedWaypointPacket(ClientboundTrackedWaypointPacket.Operation.TRACK, TrackedWaypoint.setPosition(identifier, icon, position));
+	}
+	public static ClientboundTrackedWaypointPacket updateWaypointPosition(final UUID identifier, final Waypoint.Icon icon, final Vec3i position) {
+		return new ClientboundTrackedWaypointPacket(ClientboundTrackedWaypointPacket.Operation.UPDATE, TrackedWaypoint.setPosition(identifier, icon, position));
+	}
+	public static ClientboundTrackedWaypointPacket addWaypointChunk(final UUID identifier, final Waypoint.Icon icon, final ChunkPos chunk) {
+		return new ClientboundTrackedWaypointPacket(ClientboundTrackedWaypointPacket.Operation.TRACK, TrackedWaypoint.setChunk(identifier, icon, chunk));
+	}
+	public static ClientboundTrackedWaypointPacket updateWaypointChunk(final UUID identifier, final Waypoint.Icon icon, final ChunkPos chunk) {
+		return new ClientboundTrackedWaypointPacket(ClientboundTrackedWaypointPacket.Operation.UPDATE, TrackedWaypoint.setChunk(identifier, icon, chunk));
+	}
+	public static ClientboundTrackedWaypointPacket addWaypointAzimuth(final UUID identifier, final Waypoint.Icon icon, final float angle) {
+		return new ClientboundTrackedWaypointPacket(ClientboundTrackedWaypointPacket.Operation.TRACK, TrackedWaypoint.setAzimuth(identifier, icon, angle));
+	}
+	public static ClientboundTrackedWaypointPacket updateWaypointAzimuth(final UUID identifier, final Waypoint.Icon icon, final float angle) {
+		return new ClientboundTrackedWaypointPacket(ClientboundTrackedWaypointPacket.Operation.UPDATE, TrackedWaypoint.setAzimuth(identifier, icon, angle));
+	}
+	@Override
+	public PacketType<ClientboundTrackedWaypointPacket> type() {
+		return GamePacketTypes.CLIENTBOUND_WAYPOINT;
+	}
+	public void handle(final ClientGamePacketListener listener) {
+		listener.handleWaypoint(this);
+	}
+	public void apply(final TrackedWaypointManager manager) {
+		this.operation.action.accept(manager, this.waypoint);
+	}
+	private enum Operation {
+		TRACK(WaypointManager::trackWaypoint),
+		UNTRACK(WaypointManager::untrackWaypoint),
+		UPDATE(WaypointManager::updateWaypoint);
+		private final BiConsumer<TrackedWaypointManager, TrackedWaypoint> action;
+		public static final IntFunction<ClientboundTrackedWaypointPacket.Operation> BY_ID = ByIdMap.continuous(
+			Enum::ordinal, values(), ByIdMap.OutOfBoundsStrategy.WRAP
+		);
+		public static final StreamCodec<ByteBuf, ClientboundTrackedWaypointPacket.Operation> STREAM_CODEC = ByteBufCodecs.idMapper(BY_ID, Enum::ordinal);
+		Operation(final BiConsumer<TrackedWaypointManager, TrackedWaypoint> action) {
+			this.action = action;
+		}
+	}
+}
+=================== ./net/minecraft/world/waypoints/WaypointManager.java
+package net.minecraft.world.waypoints;
+public interface WaypointManager<T extends Waypoint> {
+	void trackWaypoint(T waypoint);
+	void updateWaypoint(T waypoint);
+	void untrackWaypoint(T waypoint);
+}
+=================== ./net/minecraft/world/waypoints/Waypoint.java
+package net.minecraft.world.waypoints;
+public interface Waypoint {
+	AttributeModifier WAYPOINT_TRANSMIT_RANGE_HIDE_MODIFIER = new AttributeModifier(
+		Identifier.withDefaultNamespace("waypoint_transmit_range_hide"), -1.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL
+	);
+	static Item.Properties addHideAttribute(final Item.Properties properties) {
+		return properties.component(
+			DataComponents.ATTRIBUTE_MODIFIERS,
+			ItemAttributeModifiers.builder()
+				.add(Attributes.WAYPOINT_TRANSMIT_RANGE, WAYPOINT_TRANSMIT_RANGE_HIDE_MODIFIER, EquipmentSlotGroup.HEAD, ItemAttributeModifiers.Display.hidden())
+				.build()
+		);
+	}
+	class Icon {
+		public static final Codec<Waypoint.Icon> CODEC = RecordCodecBuilder.create(
+			i -> i.group(
+					ResourceKey.codec(WaypointStyleAssets.ROOT_ID).fieldOf("style").forGetter(icon -> icon.style),
+					ExtraCodecs.RGB_COLOR_CODEC.optionalFieldOf("color").forGetter(icon -> icon.color)
+				)
+				.apply(i, Waypoint.Icon::new)
+		);
+		public static final StreamCodec<ByteBuf, Waypoint.Icon> STREAM_CODEC = StreamCodec.composite(
+			ResourceKey.streamCodec(WaypointStyleAssets.ROOT_ID),
+			icon -> icon.style,
+			ByteBufCodecs.optional(ByteBufCodecs.RGB_COLOR),
+			icon -> icon.color,
+			Waypoint.Icon::new
+		);
+		public static final Waypoint.Icon NULL = new Waypoint.Icon();
+		public ResourceKey<WaypointStyleAsset> style = WaypointStyleAssets.DEFAULT;
+		public Optional<Integer> color = Optional.empty();
+		public Icon() {
+		}
+		private Icon(final ResourceKey<WaypointStyleAsset> style, final Optional<Integer> color) {
+			this.style = style;
+			this.color = color;
+		}
+		public boolean hasData() {
+			return this.style != WaypointStyleAssets.DEFAULT || this.color.isPresent();
+		}
+		public Waypoint.Icon cloneAndAssignStyle(final LivingEntity livingEntity) {
+			ResourceKey<WaypointStyleAsset> overrideStyle = this.getOverrideStyle();
+			Optional<Integer> colorOverride = this.color
+				.or(
+					() -> Optional.ofNullable(livingEntity.getTeam()).flatMap(t -> t.getColor()).map(teamColor -> teamColor == TeamColor.BLACK ? -13619152 : teamColor.rgb())
+				);
+			return overrideStyle == this.style && colorOverride.isEmpty() ? this : new Waypoint.Icon(overrideStyle, colorOverride);
+		}
+		public void copyFrom(final Waypoint.Icon other) {
+			this.color = other.color;
+			this.style = other.style;
+		}
+		private ResourceKey<WaypointStyleAsset> getOverrideStyle() {
+			return this.style != WaypointStyleAssets.DEFAULT ? this.style : WaypointStyleAssets.DEFAULT;
+		}
+	}
+}
+=================== ./net/minecraft/world/waypoints/WaypointTransmitter.java
+package net.minecraft.world.waypoints;
+public interface WaypointTransmitter extends Waypoint {
+	int REALLY_FAR_DISTANCE = 332;
+	boolean isTransmittingWaypoint();
+	Optional<WaypointTransmitter.Connection> makeWaypointConnectionWith(ServerPlayer player);
+	Waypoint.Icon waypointIcon();
+	static boolean doesSourceIgnoreReceiver(final LivingEntity source, final ServerPlayer receiver) {
+		if (receiver.isSpectator()) {
+			return false;
+		} else if (!source.isSpectator() && !source.hasIndirectPassenger(receiver)) {
+			double broadcastRange = Math.min(source.getAttributeValue(Attributes.WAYPOINT_TRANSMIT_RANGE), receiver.getAttributeValue(Attributes.WAYPOINT_RECEIVE_RANGE));
+			return source.distanceTo(receiver) >= broadcastRange;
+		} else {
+			return true;
+		}
+	}
+	static boolean isChunkVisible(final ChunkPos chunkPos, final ServerPlayer receiver) {
+		return receiver.getChunkTrackingView().isInViewDistance(chunkPos.x(), chunkPos.z());
+	}
+	static boolean isReallyFar(final LivingEntity source, final ServerPlayer receiver) {
+		return source.distanceTo(receiver) > 332.0F;
+	}
+	interface BlockConnection extends WaypointTransmitter.Connection {
+		int distanceManhattan();
+		@Override
+		default boolean isBroken() {
+			return this.distanceManhattan() > 1;
+		}
+	}
+	interface ChunkConnection extends WaypointTransmitter.Connection {
+		int distanceChessboard();
+		@Override
+		default boolean isBroken() {
+			return this.distanceChessboard() > 1;
+		}
+	}
+	interface Connection {
+		void connect();
+		void disconnect();
+		void update();
+		boolean isBroken();
+	}
+	class EntityAzimuthConnection implements WaypointTransmitter.Connection {
+		private final LivingEntity source;
+		private final Waypoint.Icon icon;
+		private final ServerPlayer receiver;
+		private float lastAngle;
+		public EntityAzimuthConnection(final LivingEntity source, final Waypoint.Icon icon, final ServerPlayer receiver) {
+			this.source = source;
+			this.icon = icon;
+			this.receiver = receiver;
+			Vec3 direction = receiver.position().subtract(source.position()).rotateClockwise90();
+			this.lastAngle = (float)Mth.atan2(direction.z(), direction.x());
+		}
+		@Override
+		public boolean isBroken() {
+			return WaypointTransmitter.doesSourceIgnoreReceiver(this.source, this.receiver)
+				|| WaypointTransmitter.isChunkVisible(this.source.chunkPosition(), this.receiver)
+				|| !WaypointTransmitter.isReallyFar(this.source, this.receiver);
+		}
+		@Override
+		public void connect() {
+			this.receiver.connection.send(ClientboundTrackedWaypointPacket.addWaypointAzimuth(this.source.getUUID(), this.icon, this.lastAngle));
+		}
+		@Override
+		public void disconnect() {
+			this.receiver.connection.send(ClientboundTrackedWaypointPacket.removeWaypoint(this.source.getUUID()));
+		}
+		@Override
+		public void update() {
+			Vec3 direction = this.receiver.position().subtract(this.source.position()).rotateClockwise90();
+			float currentAngle = (float)Mth.atan2(direction.z(), direction.x());
+			if (Mth.abs(currentAngle - this.lastAngle) > 0.008726646F) {
+				this.receiver.connection.send(ClientboundTrackedWaypointPacket.updateWaypointAzimuth(this.source.getUUID(), this.icon, currentAngle));
+				this.lastAngle = currentAngle;
+			}
+		}
+	}
+	class EntityBlockConnection implements WaypointTransmitter.BlockConnection {
+		private final LivingEntity source;
+		private final Waypoint.Icon icon;
+		private final ServerPlayer receiver;
+		private BlockPos lastPosition;
+		public EntityBlockConnection(final LivingEntity source, final Waypoint.Icon icon, final ServerPlayer receiver) {
+			this.source = source;
+			this.receiver = receiver;
+			this.icon = icon;
+			this.lastPosition = source.blockPosition();
+		}
+		@Override
+		public void connect() {
+			this.receiver.connection.send(ClientboundTrackedWaypointPacket.addWaypointPosition(this.source.getUUID(), this.icon, this.lastPosition));
+		}
+		@Override
+		public void disconnect() {
+			this.receiver.connection.send(ClientboundTrackedWaypointPacket.removeWaypoint(this.source.getUUID()));
+		}
+		@Override
+		public void update() {
+			BlockPos currentPosition = this.source.blockPosition();
+			if (currentPosition.distManhattan(this.lastPosition) > 0) {
+				this.receiver.connection.send(ClientboundTrackedWaypointPacket.updateWaypointPosition(this.source.getUUID(), this.icon, currentPosition));
+				this.lastPosition = currentPosition;
+			}
+		}
+		@Override
+		public int distanceManhattan() {
+			return this.lastPosition.distManhattan(this.source.blockPosition());
+		}
+		@Override
+		public boolean isBroken() {
+			return WaypointTransmitter.BlockConnection.super.isBroken() || WaypointTransmitter.doesSourceIgnoreReceiver(this.source, this.receiver);
+		}
+	}
+	class EntityChunkConnection implements WaypointTransmitter.ChunkConnection {
+		private final LivingEntity source;
+		private final Waypoint.Icon icon;
+		private final ServerPlayer receiver;
+		private ChunkPos lastPosition;
+		public EntityChunkConnection(final LivingEntity source, final Waypoint.Icon icon, final ServerPlayer receiver) {
+			this.source = source;
+			this.icon = icon;
+			this.receiver = receiver;
+			this.lastPosition = source.chunkPosition();
+		}
+		@Override
+		public int distanceChessboard() {
+			return this.lastPosition.getChessboardDistance(this.source.chunkPosition());
+		}
+		@Override
+		public void connect() {
+			this.receiver.connection.send(ClientboundTrackedWaypointPacket.addWaypointChunk(this.source.getUUID(), this.icon, this.lastPosition));
+		}
+		@Override
+		public void disconnect() {
+			this.receiver.connection.send(ClientboundTrackedWaypointPacket.removeWaypoint(this.source.getUUID()));
+		}
+		@Override
+		public void update() {
+			ChunkPos currentPosition = this.source.chunkPosition();
+			if (currentPosition.getChessboardDistance(this.lastPosition) > 0) {
+				this.receiver.connection.send(ClientboundTrackedWaypointPacket.updateWaypointChunk(this.source.getUUID(), this.icon, currentPosition));
+				this.lastPosition = currentPosition;
+			}
+		}
+		@Override
+		public boolean isBroken() {
+			return !WaypointTransmitter.ChunkConnection.super.isBroken() && !WaypointTransmitter.doesSourceIgnoreReceiver(this.source, this.receiver)
+				? WaypointTransmitter.isChunkVisible(this.lastPosition, this.receiver)
+				: true;
+		}
+	}
+}
+=================== ./net/minecraft/world/waypoints/TrackedWaypointManager.java
+package net.minecraft.world.waypoints;
+public interface TrackedWaypointManager extends WaypointManager<TrackedWaypoint> {
+}
+=================== ./net/minecraft/world/waypoints/TrackedWaypoint.java
+package net.minecraft.world.waypoints;
+public abstract class TrackedWaypoint implements Waypoint {
+	private static final Logger LOGGER = LogUtils.getLogger();
+	public static final StreamCodec<ByteBuf, TrackedWaypoint> STREAM_CODEC = StreamCodec.ofMember(TrackedWaypoint::write, TrackedWaypoint::read);
+	protected final Either<UUID, String> identifier;
+	private final Waypoint.Icon icon;
+	private final TrackedWaypoint.Type type;
+	private TrackedWaypoint(final Either<UUID, String> identifier, final Waypoint.Icon icon, final TrackedWaypoint.Type type) {
+		this.identifier = identifier;
+		this.icon = icon;
+		this.type = type;
+	}
+	public Either<UUID, String> id() {
+		return this.identifier;
+	}
+	public abstract void update(final TrackedWaypoint other);
+	public void write(final ByteBuf buf) {
+		FriendlyByteBuf byteBuf = new FriendlyByteBuf(buf);
+		byteBuf.writeEither(this.identifier, UUIDUtil.STREAM_CODEC, FriendlyByteBuf::writeUtf);
+		Waypoint.Icon.STREAM_CODEC.encode(byteBuf, this.icon);
+		byteBuf.writeEnum(this.type);
+		this.writeContents(buf);
+	}
+	public abstract void writeContents(final ByteBuf buf);
+	private static TrackedWaypoint read(final ByteBuf buf) {
+		FriendlyByteBuf byteBuf = new FriendlyByteBuf(buf);
+		Either<UUID, String> identifier = byteBuf.readEither(UUIDUtil.STREAM_CODEC, FriendlyByteBuf::readUtf);
+		Waypoint.Icon icon = Waypoint.Icon.STREAM_CODEC.decode(byteBuf);
+		TrackedWaypoint.Type type = byteBuf.readEnum(TrackedWaypoint.Type.class);
+		return type.constructor.apply(identifier, icon, byteBuf);
+	}
+	public static TrackedWaypoint setPosition(final UUID identifier, final Waypoint.Icon icon, final Vec3i position) {
+		return new TrackedWaypoint.Vec3iWaypoint(identifier, icon, position);
+	}
+	public static TrackedWaypoint setChunk(final UUID identifier, final Waypoint.Icon icon, final ChunkPos chunk) {
+		return new TrackedWaypoint.ChunkWaypoint(identifier, icon, chunk);
+	}
+	public static TrackedWaypoint setAzimuth(final UUID identifier, final Waypoint.Icon icon, final float angle) {
+		return new TrackedWaypoint.AzimuthWaypoint(identifier, icon, angle);
+	}
+	public static TrackedWaypoint empty(final UUID identifier) {
+		return new TrackedWaypoint.EmptyWaypoint(identifier);
+	}
+	public abstract double yawAngleToCamera(final Level level, final TrackedWaypoint.Camera camera, final PartialTickSupplier partialTickSupplier);
+	public abstract TrackedWaypoint.PitchDirection pitchDirectionToCamera(
+		Level level, TrackedWaypoint.Projector projector, final PartialTickSupplier partialTickSupplier
+	);
+	public abstract double distanceSquared(final Entity fromEntity);
+	public Waypoint.Icon icon() {
+		return this.icon;
+	}
+	private static class AzimuthWaypoint extends TrackedWaypoint {
+		private float angle;
+		public AzimuthWaypoint(final UUID identifier, final Waypoint.Icon icon, final float angle) {
+			super(Either.left(identifier), icon, TrackedWaypoint.Type.AZIMUTH);
+			this.angle = angle;
+		}
+		public AzimuthWaypoint(final Either<UUID, String> identifier, final Waypoint.Icon icon, final FriendlyByteBuf byteBuf) {
+			super(identifier, icon, TrackedWaypoint.Type.AZIMUTH);
+			this.angle = byteBuf.readFloat();
+		}
+		@Override
+		public void update(final TrackedWaypoint other) {
+			if (other instanceof TrackedWaypoint.AzimuthWaypoint azimuthWaypoint) {
+				this.angle = azimuthWaypoint.angle;
+			} else {
+				TrackedWaypoint.LOGGER.warn("Unsupported Waypoint update operation: {}", other.getClass());
+			}
+		}
+		@Override
+		public void writeContents(final ByteBuf buf) {
+			buf.writeFloat(this.angle);
+		}
+		@Override
+		public double yawAngleToCamera(final Level level, final TrackedWaypoint.Camera camera, final PartialTickSupplier partialTickSupplier) {
+			return Mth.degreesDifference(camera.yaw(), this.angle * (180.0F / (float)Math.PI));
+		}
+		@Override
+		public TrackedWaypoint.PitchDirection pitchDirectionToCamera(
+			final Level level, final TrackedWaypoint.Projector projector, final PartialTickSupplier partialTickSupplier
+		) {
+			double horizon = projector.projectHorizonToScreen();
+			if (horizon < -1.0) {
+				return TrackedWaypoint.PitchDirection.DOWN;
+			} else {
+				return horizon > 1.0 ? TrackedWaypoint.PitchDirection.UP : TrackedWaypoint.PitchDirection.NONE;
+			}
+		}
+		@Override
+		public double distanceSquared(final Entity fromEntity) {
+			return Double.POSITIVE_INFINITY;
+		}
+	}
+	public interface Camera {
+		float yaw();
+		Vec3 position();
+	}
+	private static class ChunkWaypoint extends TrackedWaypoint {
+		private ChunkPos chunkPos;
+		public ChunkWaypoint(final UUID identifier, final Waypoint.Icon icon, final ChunkPos chunkPos) {
+			super(Either.left(identifier), icon, TrackedWaypoint.Type.CHUNK);
+			this.chunkPos = chunkPos;
+		}
+		public ChunkWaypoint(final Either<UUID, String> identifier, final Waypoint.Icon icon, final FriendlyByteBuf byteBuf) {
+			super(identifier, icon, TrackedWaypoint.Type.CHUNK);
+			this.chunkPos = new ChunkPos(byteBuf.readVarInt(), byteBuf.readVarInt());
+		}
+		@Override
+		public void update(final TrackedWaypoint other) {
+			if (other instanceof TrackedWaypoint.ChunkWaypoint chunkWaypoint) {
+				this.chunkPos = chunkWaypoint.chunkPos;
+			} else {
+				TrackedWaypoint.LOGGER.warn("Unsupported Waypoint update operation: {}", other.getClass());
+			}
+		}
+		@Override
+		public void writeContents(final ByteBuf buf) {
+			VarInt.write(buf, this.chunkPos.x());
+			VarInt.write(buf, this.chunkPos.z());
+		}
+		private Vec3 position(final double positionY) {
+			return Vec3.atCenterOf(this.chunkPos.getMiddleBlockPosition((int)positionY));
+		}
+		@Override
+		public double yawAngleToCamera(final Level level, final TrackedWaypoint.Camera camera, final PartialTickSupplier partialTickSupplier) {
+			Vec3 cameraPosition = camera.position();
+			Vec3 direction = cameraPosition.subtract(this.position(cameraPosition.y())).rotateClockwise90();
+			float waypointAngle = (float)Mth.atan2(direction.z(), direction.x()) * (180.0F / (float)Math.PI);
+			return Mth.degreesDifference(camera.yaw(), waypointAngle);
+		}
+		@Override
+		public TrackedWaypoint.PitchDirection pitchDirectionToCamera(
+			final Level level, final TrackedWaypoint.Projector projector, final PartialTickSupplier partialTickSupplier
+		) {
+			double onScreenHorizon = projector.projectHorizonToScreen();
+			if (onScreenHorizon < -1.0) {
+				return TrackedWaypoint.PitchDirection.DOWN;
+			} else {
+				return onScreenHorizon > 1.0 ? TrackedWaypoint.PitchDirection.UP : TrackedWaypoint.PitchDirection.NONE;
+			}
+		}
+		@Override
+		public double distanceSquared(final Entity fromEntity) {
+			return fromEntity.distanceToSqr(Vec3.atCenterOf(this.chunkPos.getMiddleBlockPosition(fromEntity.getBlockY())));
+		}
+	}
+	private static class EmptyWaypoint extends TrackedWaypoint {
+		private EmptyWaypoint(final Either<UUID, String> identifier, final Waypoint.Icon icon, final FriendlyByteBuf byteBuf) {
+			super(identifier, icon, TrackedWaypoint.Type.EMPTY);
+		}
+		private EmptyWaypoint(final UUID identifier) {
+			super(Either.left(identifier), Waypoint.Icon.NULL, TrackedWaypoint.Type.EMPTY);
+		}
+		@Override
+		public void update(final TrackedWaypoint other) {
+		}
+		@Override
+		public void writeContents(final ByteBuf buf) {
+		}
+		@Override
+		public double yawAngleToCamera(final Level level, final TrackedWaypoint.Camera camera, final PartialTickSupplier partialTickSupplier) {
+			return Double.NaN;
+		}
+		@Override
+		public TrackedWaypoint.PitchDirection pitchDirectionToCamera(
+			final Level level, final TrackedWaypoint.Projector projector, final PartialTickSupplier partialTickSupplier
+		) {
+			return TrackedWaypoint.PitchDirection.NONE;
+		}
+		@Override
+		public double distanceSquared(final Entity fromEntity) {
+			return Double.POSITIVE_INFINITY;
+		}
+	}
+	public enum PitchDirection {
+		NONE,
+		UP,
+		DOWN;
+	}
+	public interface Projector {
+		Vec3 projectPointToScreen(final Vec3 point);
+		double projectHorizonToScreen();
+	}
+	private enum Type {
+		EMPTY(TrackedWaypoint.EmptyWaypoint::new),
+		VEC3I(TrackedWaypoint.Vec3iWaypoint::new),
+		CHUNK(TrackedWaypoint.ChunkWaypoint::new),
+		AZIMUTH(TrackedWaypoint.AzimuthWaypoint::new);
+		private final TriFunction<Either<UUID, String>, Waypoint.Icon, FriendlyByteBuf, TrackedWaypoint> constructor;
+		Type(final TriFunction<Either<UUID, String>, Waypoint.Icon, FriendlyByteBuf, TrackedWaypoint> constructor) {
+			this.constructor = constructor;
+		}
+	}
+	private static class Vec3iWaypoint extends TrackedWaypoint {
+		private Vec3i vector;
+		public Vec3iWaypoint(final UUID identifier, final Waypoint.Icon icon, final Vec3i vector) {
+			super(Either.left(identifier), icon, TrackedWaypoint.Type.VEC3I);
+			this.vector = vector;
+		}
+		public Vec3iWaypoint(final Either<UUID, String> identifier, final Waypoint.Icon icon, final FriendlyByteBuf byteBuf) {
+			super(identifier, icon, TrackedWaypoint.Type.VEC3I);
+			this.vector = new Vec3i(byteBuf.readVarInt(), byteBuf.readVarInt(), byteBuf.readVarInt());
+		}
+		@Override
+		public void update(final TrackedWaypoint other) {
+			if (other instanceof TrackedWaypoint.Vec3iWaypoint vec3iWaypoint) {
+				this.vector = vec3iWaypoint.vector;
+			} else {
+				TrackedWaypoint.LOGGER.warn("Unsupported Waypoint update operation: {}", other.getClass());
+			}
+		}
+		@Override
+		public void writeContents(final ByteBuf buf) {
+			VarInt.write(buf, this.vector.getX());
+			VarInt.write(buf, this.vector.getY());
+			VarInt.write(buf, this.vector.getZ());
+		}
+		private Vec3 position(final Level level, final PartialTickSupplier partialTick) {
+			return this.identifier
+				.left()
+=================== ./net/minecraft/client/data/models/WaypointStyleProvider.java
+package net.minecraft.client.data.models;
+public class WaypointStyleProvider implements DataProvider {
+	private final PathProvider pathProvider;
+	public WaypointStyleProvider(final PackOutput output) {
+		this.pathProvider = output.createPathProvider(Target.RESOURCE_PACK, "waypoint_style");
+	}
+	private static void bootstrap(final BiConsumer<ResourceKey<WaypointStyleAsset>, WaypointStyle> consumer) {
+		consumer.accept(
+			WaypointStyleAssets.DEFAULT,
+			new WaypointStyle(
+				128,
+				332,
+				List.of(
+					Identifier.withDefaultNamespace("default_0"),
+					Identifier.withDefaultNamespace("default_1"),
+					Identifier.withDefaultNamespace("default_2"),
+					Identifier.withDefaultNamespace("default_3")
+				)
+			)
+		);
+		consumer.accept(
+			WaypointStyleAssets.BOWTIE,
+			new WaypointStyle(
+				64,
+				332,
+				List.of(
+					Identifier.withDefaultNamespace("bowtie"),
+					Identifier.withDefaultNamespace("default_0"),
+					Identifier.withDefaultNamespace("default_1"),
+					Identifier.withDefaultNamespace("default_2"),
+					Identifier.withDefaultNamespace("default_3")
+				)
+			)
+		);
+	}
+	public CompletableFuture<?> run(final CachedOutput cache) {
+		Map<ResourceKey<WaypointStyleAsset>, WaypointStyle> waypointStyles = new HashMap<>();
+		bootstrap((id, asset) -> {
+			if (waypointStyles.putIfAbsent(id, asset) != null) {
+				throw new IllegalStateException("Tried to register waypoint style twice for id: " + id);
+			}
+		});
+		return DataProvider.saveAll(cache, WaypointStyle.CODEC, this.pathProvider::json, waypointStyles);
+	}
+	public String getName() {
+		return "Waypoint Style Definitions";
+	}
+}
+=================== ./net/minecraft/client/resources/WaypointStyleManager.java
+package net.minecraft.client.resources;
+public class WaypointStyleManager extends SimpleJsonResourceReloadListener<WaypointStyle> {
+	private static final FileToIdConverter ASSET_LISTER = FileToIdConverter.json("waypoint_style");
+	private static final WaypointStyle MISSING = new WaypointStyle(0, 1, List.of(MissingTextureAtlasSprite.getLocation()));
+	private Map<ResourceKey<WaypointStyleAsset>, WaypointStyle> waypointStyles = Map.of();
+	public WaypointStyleManager() {
+		super(WaypointStyle.CODEC, ASSET_LISTER);
+	}
+	protected void apply(final Map<Identifier, WaypointStyle> preparations, final ResourceManager manager, final ProfilerFiller profiler) {
+		this.waypointStyles = preparations.entrySet()
+			.stream()
+			.collect(Collectors.toUnmodifiableMap(e -> ResourceKey.create(WaypointStyleAssets.ROOT_ID, e.getKey()), Entry::getValue));
+	}
+	public WaypointStyle get(final ResourceKey<WaypointStyleAsset> id) {
+		return this.waypointStyles.getOrDefault(id, MISSING);
+	}
+}
+=================== ./net/minecraft/client/resources/WaypointStyle.java
+package net.minecraft.client.resources;
+public record WaypointStyle(int nearDistance, int farDistance, List<Identifier> sprites, List<Identifier> spriteLocations) {
+	@VisibleForTesting
+	public static final String ICON_LOCATION_PREFIX = "hud/locator_bar_dot/";
+	public static final int DEFAULT_NEAR_DISTANCE = 128;
+	public static final int DEFAULT_FAR_DISTANCE = 332;
+	private static final Codec<Integer> DISTANCE_CODEC = Codec.intRange(0, 60000000);
+	public static final Codec<WaypointStyle> CODEC = RecordCodecBuilder.<WaypointStyle>create(
+			i -> i.group(
+					DISTANCE_CODEC.optionalFieldOf("near_distance", 128).forGetter(WaypointStyle::nearDistance),
+					DISTANCE_CODEC.optionalFieldOf("far_distance", 332).forGetter(WaypointStyle::farDistance),
+					ExtraCodecs.nonEmptyList(Identifier.CODEC.listOf()).fieldOf("sprites").forGetter(WaypointStyle::sprites)
+				)
+				.apply(i, WaypointStyle::new)
+		)
+		.validate(WaypointStyle::validate);
+	public WaypointStyle(final int nearDistance, final int farDistance, final List<Identifier> sprites) {
+		this(nearDistance, farDistance, sprites, sprites.stream().map(sprite -> sprite.withPrefix("hud/locator_bar_dot/")).toList());
+	}
+	@VisibleForTesting
+	public DataResult<WaypointStyle> validate() {
+		if (this.sprites.isEmpty()) {
+			return DataResult.error(() -> "Must have at least one sprite icon");
+		} else if (this.nearDistance <= 0) {
+			return DataResult.error(() -> "Near distance (" + this.nearDistance + ") must be greater than zero");
+		} else {
+			return this.nearDistance >= this.farDistance
+				? DataResult.error(() -> "Far distance (" + this.farDistance + ") cannot be closer or equal to near distance (" + this.nearDistance + ")")
+				: DataResult.success(this);
+		}
+	}
+	public Identifier sprite(final float distance) {
+		if (distance < this.nearDistance) {
+			return this.spriteLocations.getFirst();
+		}
+		if (distance >= this.farDistance) {
+			return this.spriteLocations.getLast();
+		}
+		if (this.spriteLocations.size() == 1) {
+			return this.spriteLocations.getFirst();
+		}
+		if (this.spriteLocations.size() == 3) {
+			return this.spriteLocations.get(1);
+		}
+		int index = Mth.lerpInt((distance - this.nearDistance) / (this.farDistance - this.nearDistance), 1, this.spriteLocations.size() - 1);
+		return this.spriteLocations.get(index);
+	}
+}
+=================== ./net/minecraft/client/waypoints/package-info.java
+@NullMarked
+package net.minecraft.client.waypoints;
+=================== ./net/minecraft/client/waypoints/ClientWaypointManager.java
+package net.minecraft.client.waypoints;
+public class ClientWaypointManager implements TrackedWaypointManager {
+	private final Map<Either<UUID, String>, TrackedWaypoint> waypoints = new ConcurrentHashMap<>();
+	public void trackWaypoint(final TrackedWaypoint waypoint) {
+		this.waypoints.put(waypoint.id(), waypoint);
+	}
+	public void updateWaypoint(final TrackedWaypoint waypoint) {
+		this.waypoints.get(waypoint.id()).update(waypoint);
+	}
+	public void untrackWaypoint(final TrackedWaypoint waypoint) {
+		this.waypoints.remove(waypoint.id());
+	}
+	public boolean hasWaypoints() {
+		return !this.waypoints.isEmpty();
+	}
+	public void forEachWaypoint(final Entity fromEntity, final Consumer<TrackedWaypoint> consumer) {
+		this.waypoints
+			.values()
+			.stream()
+			.sorted(Comparator.<TrackedWaypoint>comparingDouble(waypoint -> waypoint.distanceSquared(fromEntity)).reversed())
+			.forEachOrdered(consumer);
+	}
+}
+=================== ./net/minecraft/server/waypoints/ServerWaypointManager.java
+package net.minecraft.server.waypoints;
+public class ServerWaypointManager implements WaypointManager<WaypointTransmitter> {
+	private final Set<WaypointTransmitter> waypoints = new HashSet<>();
+	private final Set<ServerPlayer> players = new HashSet<>();
+	private final Table<ServerPlayer, WaypointTransmitter, WaypointTransmitter.Connection> connections = HashBasedTable.create();
+	public void trackWaypoint(final WaypointTransmitter waypoint) {
+		this.waypoints.add(waypoint);
+		for (ServerPlayer player : this.players) {
+			this.createConnection(player, waypoint);
+		}
+	}
+	public void updateWaypoint(final WaypointTransmitter waypoint) {
+		if (this.waypoints.contains(waypoint)) {
+			Map<ServerPlayer, WaypointTransmitter.Connection> playerConnection = Tables.transpose(this.connections).row(waypoint);
+			SetView<ServerPlayer> potentialPlayers = Sets.difference(this.players, playerConnection.keySet());
+			for (Entry<ServerPlayer, WaypointTransmitter.Connection> waypointConnection : ImmutableSet.copyOf(playerConnection.entrySet())) {
+				this.updateConnection(waypointConnection.getKey(), waypoint, waypointConnection.getValue());
+			}
+			for (ServerPlayer player : potentialPlayers) {
+				this.createConnection(player, waypoint);
+			}
+		}
+	}
+	public void untrackWaypoint(final WaypointTransmitter waypoint) {
+		this.connections.column(waypoint).forEach((player, connection) -> connection.disconnect());
+		Tables.transpose(this.connections).row(waypoint).clear();
+		this.waypoints.remove(waypoint);
+	}
+	public void addPlayer(final ServerPlayer player) {
+		this.players.add(player);
+		for (WaypointTransmitter waypoint : this.waypoints) {
+			this.createConnection(player, waypoint);
+		}
+		if (player.isTransmittingWaypoint()) {
+			this.trackWaypoint(player);
+		}
+	}
+	public void updatePlayer(final ServerPlayer player) {
+		Map<WaypointTransmitter, WaypointTransmitter.Connection> waypointConnections = this.connections.row(player);
+		SetView<WaypointTransmitter> potentialWaypoints = Sets.difference(this.waypoints, waypointConnections.keySet());
+		for (Entry<WaypointTransmitter, WaypointTransmitter.Connection> waypointConnection : ImmutableSet.copyOf(waypointConnections.entrySet())) {
+			this.updateConnection(player, waypointConnection.getKey(), waypointConnection.getValue());
+		}
+		for (WaypointTransmitter waypoint : potentialWaypoints) {
+			this.createConnection(player, waypoint);
+		}
+	}
+	public void removePlayer(final ServerPlayer player) {
+		this.connections.row(player).values().removeIf(connection -> {
+			connection.disconnect();
+			return true;
+		});
+		this.untrackWaypoint(player);
+		this.players.remove(player);
+	}
+	public void breakAllConnections() {
+		this.connections.values().forEach(WaypointTransmitter.Connection::disconnect);
+		this.connections.clear();
+	}
+	public void remakeConnections(final WaypointTransmitter waypoint) {
+		for (ServerPlayer player : this.players) {
+			this.createConnection(player, waypoint);
+		}
+	}
+	public Set<WaypointTransmitter> transmitters() {
+		return this.waypoints;
+	}
+	private static boolean isLocatorBarEnabledFor(final ServerPlayer player) {
+		return player.level().getGameRules().get(GameRules.LOCATOR_BAR);
+	}
+	private void createConnection(final ServerPlayer player, final WaypointTransmitter waypoint) {
+		if (player != waypoint) {
+			if (isLocatorBarEnabledFor(player)) {
+				waypoint.makeWaypointConnectionWith(player).ifPresentOrElse(connection -> {
+					this.connections.put(player, waypoint, connection);
+					connection.connect();
+				}, () -> {
+					WaypointTransmitter.Connection connection = this.connections.remove(player, waypoint);
+					if (connection != null) {
+						connection.disconnect();
+					}
+				});
+			}
+		}
+	}
+	private void updateConnection(final ServerPlayer player, final WaypointTransmitter waypoint, final WaypointTransmitter.Connection connection) {
+		if (player != waypoint) {
+			if (isLocatorBarEnabledFor(player)) {
+				if (!connection.isBroken()) {
+					connection.update();
+				} else {
+					waypoint.makeWaypointConnectionWith(player).ifPresentOrElse(newConnection -> {
+						newConnection.connect();
+						this.connections.put(player, waypoint, newConnection);
+					}, () -> {
+						connection.disconnect();
+						this.connections.remove(player, waypoint);
+					});
+				}
+			}
+		}
+	}
+}
+### getWaypointManager
+net/minecraft/client/gui/contextualbar/LocatorBar.java:50:				.getWaypointManager()
+net/minecraft/client/gui/Hud.java:1316:		boolean canShowLocatorInfo = this.minecraft.player.connection.getWaypointManager().hasWaypoints();
+net/minecraft/client/waypoints/ClientWaypointManager.java:11:import net.minecraft.world.waypoints.TrackedWaypointManager;
+net/minecraft/client/waypoints/ClientWaypointManager.java:13:public class ClientWaypointManager implements TrackedWaypointManager {
+net/minecraft/client/multiplayer/ClientPacketListener.java:73:import net.minecraft.client.waypoints.ClientWaypointManager;
+net/minecraft/client/multiplayer/ClientPacketListener.java:437:	private final ClientWaypointManager waypointManager = new ClientWaypointManager();
+net/minecraft/client/multiplayer/ClientPacketListener.java:2739:	public ClientWaypointManager getWaypointManager() {
