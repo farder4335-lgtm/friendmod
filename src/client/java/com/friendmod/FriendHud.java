@@ -15,7 +15,7 @@ public final class FriendHud {
 
 	public static void render(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
 		Minecraft client = Minecraft.getInstance();
-		if (client.player == null || client.level == null || client.options.hideGui) {
+		if (client.player == null || client.level == null) {
 			return;
 		}
 
