@@ -9,6 +9,7 @@ Client-side mod. Commands (type with a leading slash in chat):
 Friends' nicknames are slightly green (above the head and in Tab).
 You cannot hit friends (the attack is cancelled).
 A friend who is 20+ blocks away is shown at the top of the screen as an arrow and the distance in metres.
+Outside the render distance the position comes from the server's locator-bar waypoints; if the server does not send them, the friend cannot be located (distance may show as `?` when only the direction is known).
 A player that a friend is hitting gets a red nickname for 5 seconds.
 
 The list is saved in `.minecraft/config/friends.json`.
