@@ -2,7 +2,10 @@ package com.friendmod;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.Map;
 import java.util.UUID;
 
@@ -50,6 +53,7 @@ public final class FriendHud {
 			}
 		};
 
+		Set<String> shown = new HashSet<>();
 		int y = 20;
 		for (PlayerInfo info : connection.getListedOnlinePlayers()) {
 			String name = info.getProfile().name();
@@ -80,6 +84,7 @@ public final class FriendHud {
 				distance = Double.isInfinite(distanceSq) ? -1 : Math.sqrt(distanceSq);
 			}
 
+			shown.add(name.toLowerCase(Locale.ROOT));
 			if (distance >= 0 && distance < MIN_DISTANCE) {
 				continue;
 			}
@@ -87,6 +92,33 @@ public final class FriendHud {
 			int index = Math.floorMod((int) Math.round(relative / 45.0), 8);
 			String meters = distance < 0 ? "?" : String.valueOf(Math.round(distance));
 			String text = ARROWS[index] + " " + name + " " + meters + " м";
+			graphics.centeredText(client.font, text, graphics.guiWidth() / 2, y, 0xFF000000 | FriendTracker.FRIEND_COLOR);
+			y += 11;
+		}
+
+		// Friends who share their position through the shared channel (works at any distance).
+		String dimension = client.level.dimension().toString();
+		for (ShareChannel.Position shared : ShareChannel.positions()) {
+			String lower = shared.name().toLowerCase(Locale.ROOT);
+			boolean loadedNearby = client.level.players().stream().anyMatch(p -> p.getPlainTextName().equalsIgnoreCase(shared.name()));
+			if (shown.contains(lower) || loadedNearby) {
+				continue;
+			}
+			String text;
+			if (!shared.dimension().equals(dimension)) {
+				text = shared.name() + " (\u0434\u0440\u0443\u0433\u043e\u0435 \u0438\u0437\u043c\u0435\u0440\u0435\u043d\u0438\u0435)";
+			} else {
+				double dx = shared.x() - client.player.getX();
+				double dy = shared.y() - client.player.getY();
+				double dz = shared.z() - client.player.getZ();
+				double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+				if (distance < MIN_DISTANCE) {
+					continue;
+				}
+				double relative = Mth.wrapDegrees(Math.toDegrees(Math.atan2(-dx, dz)) - client.player.getYRot());
+				int index = Math.floorMod((int) Math.round(relative / 45.0), 8);
+				text = ARROWS[index] + " " + shared.name() + " " + Math.round(distance) + " \u043c";
+			}
 			graphics.centeredText(client.font, text, graphics.guiWidth() / 2, y, 0xFF000000 | FriendTracker.FRIEND_COLOR);
 			y += 11;
 		}
@@ -108,6 +140,7 @@ public final class FriendHud {
 			total[0]++;
 			wp.id().left().ifPresent(id -> waypoints.put(id, wp));
 		});
+		lines.add("shared channel: " + ShareChannel.status());
 		lines.add("waypoints from server: " + total[0] + " (with player UUID: " + waypoints.size() + ")");
 		lines.add("friends in list: " + FriendList.all().size() + ", players in Tab: " + connection.getListedOnlinePlayers().size());
 

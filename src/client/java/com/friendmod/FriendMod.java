@@ -26,6 +26,8 @@ public class FriendMod implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		FriendList.load();
+		ShareChannel.loadAndStart();
+		ClientTickEvents.END_CLIENT_TICK.register(ShareChannel::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(FriendTracker::tick);
 
 		// Do not hit friends: cancel the attack on the client.
@@ -62,6 +64,30 @@ public class FriendMod implements ClientModInitializer {
 								} else {
 									ctx.getSource().sendError(Component.literal(nick + " не в списке друзей"));
 								}
+								return 1;
+							})))
+					.then(ClientCommands.literal("share")
+						.then(ClientCommands.literal("off")
+							.executes(ctx -> {
+								ShareChannel.stop(true);
+								ctx.getSource().sendFeedback(Component.literal("Общий канал выключен"));
+								return 1;
+							}))
+						.then(ClientCommands.literal("status")
+							.executes(ctx -> {
+								ctx.getSource().sendFeedback(Component.literal("Общий канал: " + ShareChannel.status()));
+								return 1;
+							}))
+						.then(ClientCommands.argument("phrase", StringArgumentType.greedyString())
+							.executes(ctx -> {
+								String phrase = StringArgumentType.getString(ctx, "phrase").trim();
+								if (phrase.length() < 8) {
+									ctx.getSource().sendError(Component.literal("Фраза слишком короткая: нужно минимум 8 символов"));
+									return 0;
+								}
+								ShareChannel.start(phrase, true);
+								ctx.getSource().sendFeedback(Component.literal("Общий канал включён. У друга должна быть та же фраза.")
+									.withStyle(ChatFormatting.GREEN));
 								return 1;
 							})))
 					.then(ClientCommands.literal("debug")

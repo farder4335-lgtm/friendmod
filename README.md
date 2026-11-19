@@ -4,6 +4,8 @@ Client-side mod. Commands (type with a leading slash in chat):
 
 - `/friend add <nick>`    - add a friend
 - `/friend remove <nick>` - remove a friend (Tab completes from your list)
+- `/friend share <phrase>` - shared channel with a friend (same phrase on both sides, min 8 chars)
+- `/friend share off|status`
 - `/friend debug`        - diagnostics: what waypoints the server sends and how friends match
 - `/friend list`          - show friends
 
