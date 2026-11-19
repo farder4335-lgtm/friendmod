@@ -13,6 +13,7 @@ import net.minecraft.network.chat.Component;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 
 public class FriendMod implements ClientModInitializer {
 	public static final Logger LOGGER = LoggerFactory.getLogger("friendmod");
@@ -20,6 +21,7 @@ public class FriendMod implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		FriendList.load();
+		ClientTickEvents.END_CLIENT_TICK.register(FriendTracker::tick);
 
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, buildContext) ->
 			dispatcher.register(

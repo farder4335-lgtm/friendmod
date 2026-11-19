@@ -3,7 +3,8 @@
 	"package": "com.friendmod.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"client": [
-		"FriendNameMixin"
+		"PlayerNameMixin",
+		"TabListMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
