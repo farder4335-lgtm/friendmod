@@ -21,19 +21,16 @@ jobs:
       - name: Extract info
         shell: bash {0}
         run: |
-          find / -name "*sources*.jar" 2>/dev/null | grep -v "/proc/" > /tmp/cands.txt
-          JAR=$(grep -i "minecraft" /tmp/cands.txt | grep -vi "fabric-api\|fabric-loader\|/build/libs/" | head -n 1)
-          echo "sources jar: $JAR"
-          mkdir -p /tmp/src && cd /tmp/src && unzip -q "$JAR"; ls | head
+          mkdir -p /tmp/src && cd /tmp/src
+          for J in $(find /home/runner/work -path "*loom-cache/minecraftMaven*" -name "*sources.jar"); do echo "jar $J" >> /tmp/jars.txt; unzip -qo "$J"; done
           {
-            echo "### jar: $JAR"; cat /tmp/cands.txt | head -20
-            echo "### Entity.getDisplayName"; grep -n -A12 "Component getDisplayName" net/minecraft/world/entity/Entity.java
-            echo "### Player/Avatar getDisplayName/getName"; grep -rn "getDisplayName\|Component getName" net/minecraft/world/entity/player/Player.java net/minecraft/world/entity/Avatar.java 2>/dev/null
-            echo "### nameTag in renderers"; grep -rn "nameTag\|getNameTag\|shouldShowName" net/minecraft/client/renderer/entity/EntityRenderer.java net/minecraft/client/renderer/entity/player/*.java net/minecraft/client/renderer/entity/state/EntityRenderState.java 2>/dev/null
-            echo "### LivingEntity fields"; grep -n "public int hurtTime\|public int hurtDuration\|public boolean swinging\|public int swingTime\|public float attackAnim\|swingTime;" net/minecraft/world/entity/LivingEntity.java
-            echo "### tab overlay"; grep -rn -B2 -A14 "getNameForDisplay" net/minecraft/client/gui/components/PlayerTabOverlay.java | head -60
-            echo "### level players"; grep -rn "List<AbstractClientPlayer> players\|players()" net/minecraft/client/multiplayer/ClientLevel.java net/minecraft/world/level/Level.java | head
-            echo "### GameProfile name"; grep -rn "gameProfile\|getGameProfile" net/minecraft/world/entity/player/Player.java | head -5
+            cat /tmp/jars.txt
+            echo "### Player.getDisplayName"; sed -n '1620,1700p' net/minecraft/world/entity/player/Player.java
+            echo "### nameTag across client"; grep -rn "nameTag" net/minecraft/client/renderer/entity/ | head -60
+            echo "### EntityRenderer name related"; grep -n -B2 -A12 "getNameTag\|shouldShowName\|extractRenderState" net/minecraft/client/renderer/entity/EntityRenderer.java | head -120
+            echo "### Avatar/Player renderer"; ls net/minecraft/client/renderer/entity/player/ 2>/dev/null; grep -rn "nameTag\|getDisplayName\|getScoreboardDisplayName" net/minecraft/client/renderer/entity/player/ net/minecraft/client/renderer/entity/LivingEntityRenderer.java 2>/dev/null | head -40
+            echo "### tab overlay"; grep -rn -A12 "getNameForDisplay" net/minecraft/client/gui/components/PlayerTabOverlay.java | head -50
+            echo "### level players"; grep -n "players()" net/minecraft/client/multiplayer/ClientLevel.java | head
           } > /tmp/inspect.txt
       - name: Publish result to branch
         run: |
